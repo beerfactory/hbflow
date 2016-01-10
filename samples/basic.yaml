@@ -1,0 +1,47 @@
+graph:
+  name : Graph
+  description: some description
+  author: Nico
+  revision : 1.0
+  date : 2016-01-10
+
+  processes:
+    ReadFile
+      component: SomeComponent
+    CountWord
+      component: WordCounter
+
+  connections:
+    -
+      name: some_connection_name #optional
+      source:
+        process: ReadFile
+        port: OUT
+      target:
+        process: CountWord
+        port: IN
+      capacity: 5
+    -
+      source:
+        data: "some data"
+      target:
+        process: "Count word"
+        port: "in"
+
+  process_group:
+    name: Group1
+    processes:
+        ReadFile
+          component: SomeComponent
+        CountWord
+          component: WordCounter
+    connections:
+      -
+        name: some_connection_name #optional
+        source:
+          process: ReadFile
+          port: OUT
+        target:
+          process: CountWord
+          port: IN
+        capacity: 5

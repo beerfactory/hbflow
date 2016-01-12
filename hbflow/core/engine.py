@@ -1,7 +1,14 @@
+from .component import Graph, new_component_instance
 
 
 class GraphEngine:
     def __init__(self, loop=None):
-        pass
+        self.graph = None
 
-    def load
+    @property
+    def graph(self):
+        return self.graph
+
+    @graph.setter
+    def graph(self, g):
+        self.graph = g

@@ -203,16 +203,14 @@ class Connection(object, metaclass=InstanceCounterMeta):
 
 
 class IN:
-    def __init__(self, name=None, description=None, display_name=None, array_size=1):
-        self.name = name
+    def __init__(self, description=None, display_name=None, array_size=1):
         self.description = description
         self.display_name = display_name
         self.array_size = array_size
 
 
 class OUT:
-    def __init__(self, name=None, description=None, display_name=None, array_size=1):
-        self.name = name
+    def __init__(self, description=None, display_name=None, array_size=1):
         self.description = description
         self.display_name = display_name
         self.array_size = array_size
@@ -260,9 +258,9 @@ class Component(object, metaclass=InstanceCounterMeta):
         {'trigger': 'shutdown', 'source': 'stopped', 'dest': 'sshutdown'},
     ]
 
-    debug_port = IN(name='debug')
-    command_port = IN(name='command')
-    _status_port = OUT()
+    _debug_in = IN()
+    _command_in = IN()
+    _status_out = OUT()
 
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls)

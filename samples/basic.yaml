@@ -6,34 +6,28 @@ graph:
   date : 2016-01-10
 
   processes:
-    ReadFile
-      component: SomeComponent
-    CountWord
-      component: WordCounter
+    ReadFile:
+      component: hbflow.core.component.TestComponent
+    CountWord:
+      component: hbflow.core.component.TestComponent
 
   connections:
     -
       name: some_connection_name #optional
       source:
         process: ReadFile
-        port: OUT
+        port: _out
       target:
         process: CountWord
-        port: IN
+        port: _in
       capacity: 5
-    -
-      source:
-        data: "some data"
-      target:
-        process: "Count word"
-        port: "in"
 
   process_group:
     name: Group1
     processes:
-        ReadFile
+        ReadFile:
           component: SomeComponent
-        CountWord
+        CountWord:
           component: WordCounter
     connections:
       -

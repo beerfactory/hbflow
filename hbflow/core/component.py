@@ -32,24 +32,27 @@ class OutputPort(Port):
     pass
 
 
-def new_component_instance(component_name, name):
+def new_component_instance(component, name):
     """
     Create a component instance (a process) given a component name.
     The component name (formed module.class) is used to import the python module containing the class. A new class
     instance is then created with the given name.
-    :param component_name: component name to load (in the form of module_name.class_name)
+    :param component: component name to load (in the form of module_name.class_name)
     :param name: optional name to give to the process
     :return: the component instance (the process)
     """
-    try:
-        module_name, class_name = component_name.rsplit(".", 1)
-        component_class = getattr(importlib.import_module(module_name), class_name)
-    except ValueError:
-        raise ComponentException("Invalid component format name '%s'" % component_name)
-    except AttributeError:
-        raise ComponentException("Component '%s' not found in module '%s'" % (class_name, module_name))
-    except ImportError:
-        raise ComponentException("Module '%s' can't be imported" % module_name)
+    if issubclass(component, Component):
+        component_class = component
+    else:
+        try:
+            module_name, class_name = component.rsplit(".", 1)
+            component_class = getattr(importlib.import_module(module_name), class_name)
+        except ValueError:
+            raise ComponentException("Invalid component format name '%s'" % component)
+        except AttributeError:
+            raise ComponentException("Component '%s' not found in module '%s'" % (class_name, module_name))
+        except ImportError:
+            raise ComponentException("Module '%s' can't be imported" % module_name)
 
     return new_process(name, component_class)
 

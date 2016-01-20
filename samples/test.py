@@ -1,6 +1,6 @@
 import yaml
 import logging
-from hbflow.core.component import Graph
+from hbflow.core.graph import Graph
 
 def read_yaml_config(config_file):
     config = None

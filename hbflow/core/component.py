@@ -25,11 +25,33 @@ class Port:
 
 
 class InputPort(Port):
-    pass
+    def __init__(self, description=None, display_name=None, array_size=1):
+        super().__init__(description, display_name, array_size)
 
 
 class OutputPort(Port):
-    pass
+    def __init__(self, description=None, display_name=None, array_size=1):
+        super().__init__(description, display_name, array_size)
+
+
+def get_component_class(component_name):
+    """
+    Find a component given its component name.
+    The component name (formed module.class) is used to import the python module containing the class. A new class
+    instance is then created with the given name.
+    :param component_name: component name to load (in the form of module_name.class_name)
+    :return: the component instance (the process)
+    """
+    try:
+        module_name, class_name = component_name.rsplit(".", 1)
+        component_class = getattr(importlib.import_module(module_name), class_name)
+    except ValueError:
+        raise ComponentException("Invalid component format name '%s'" % component_name)
+    except AttributeError:
+        raise ComponentException("Component '%s' not found in module '%s'" % (class_name, module_name))
+    except ImportError:
+        raise ComponentException("Module '%s' can't be imported" % module_name)
+    return component_class
 
 
 def new_component_instance(component, name):
@@ -68,6 +90,7 @@ def new_process(name, component_class):
 
 
 class Connection(object, metaclass=InstanceCounterMeta):
+    states = ['new', 'linked', 'unlinked']
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls)
         instance._seq_id = next(cls._ids)
@@ -76,18 +99,27 @@ class Connection(object, metaclass=InstanceCounterMeta):
 
     def __init__(self, name=None):
         self.id = uuid4()
+        self.machine = Machine(model=self, states=Connection.states, initial='new')
         if name:
             self.name = name
+        self.source = None
+        self.target = None
 
     def __eq__(self, other):
         return self.id == other.id
 
     def link(self, source: OutputPort, target:InputPort):
+        self.source = source
+        self.target = target
         source.add_connection(self)
         target.add_connection(self)
+        self.to_linked()
 
     def unlink(self):
-        pass
+        self.source = None()
+        self.target = None()
+        # Todo: remove connection from source and target
+        self.to_unlinked()
 
 
 class IN:

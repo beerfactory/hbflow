@@ -1,5 +1,5 @@
 graph:
-  name : Graph
+  name : test_graph
   description: some description
   author: Nico
   revision : 1.0

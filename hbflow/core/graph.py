@@ -1,11 +1,22 @@
 from uuid import uuid4
 from datetime import datetime
 from hbflow.utils import InstanceCounterMeta
-from .component import new_component_instance, Connection, Component
+from .component import get_component_class, OUT, IN, Connection, Component
 import logging
+import asyncio
+
 
 class GraphException(Exception):
     pass
+
+
+class GraphManager(Component):
+
+    command_out = OUT()
+    status_in = IN()
+
+    def __init__(self, name=None):
+        super().__init__(name)
 
 
 class Graph(object, metaclass=InstanceCounterMeta):
@@ -25,20 +36,31 @@ class Graph(object, metaclass=InstanceCounterMeta):
         self.author = author
         self.date = date
         self.id = uuid4()
-        self.processes = dict()
+        self.components = dict()
         self.connections = dict()
 
-    def add_process(self, name, component_name, group=None):
-        if name in self.processes:
-            raise GraphException("Duplicate process name '%s'" % name)
-        self.processes[name] = new_component_instance(component_name, name)
-        # To be removed
+    @asyncio.coroutine
+    def run(self, loop=None):
+        if not loop:
+            self.loop = asyncio.get_event_loop()
+        else:
+            self.loop = loop
+
+    def add_process(self, process_name, component, group=None):
+        if process_name in self.components:
+            raise GraphException("Duplicate process name '%s'" % process_name)
+        if isinstance(component, str):
+            self.components[process_name] = get_component_class(component)
+        elif issubclass(component, Component):
+            self.components[process_name] = component
+        else:
+            raise GraphException("Invalid component argument for process '%s'" % process_name)
         if group:
             self.logger.warning("Process not implemented yet. Adding '%s' process to root" % name)
 
     def _get_process_or_raise(self, process_name):
         try:
-            src = self.processes[process_name]
+            src = self.components[process_name]
             return src
         except KeyError:
             raise GraphException("Unkown process '%s'" % process_name)

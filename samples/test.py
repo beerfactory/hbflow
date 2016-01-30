@@ -16,5 +16,4 @@ if __name__ == "__main__":
     config = read_yaml_config("basic.yaml")
     ge = GraphEngine()
     ge.init_from_dictionary(config)
-    ge.instantiate_graph()
     print(ge.processes)

@@ -1,6 +1,6 @@
 from uuid import uuid4
 from transitions import Machine
-from hbflow.utils import InstanceCounterMeta
+from hbflow.utils import InstanceCounterMeta, IdentifiableObject
 import importlib
 
 
@@ -86,14 +86,8 @@ def new_process(name, component_class):
     return component_class(name) or None
 
 
-class Connection(object, metaclass=InstanceCounterMeta):
+class Connection(IdentifiableObject):
     states = ['new', 'linked', 'unlinked']
-
-    def __new__(cls, *args, **kwargs):
-        instance = super().__new__(cls)
-        instance._seq_id = next(cls._ids)
-        instance.name = cls.__name__ + "_" + str(instance._seq_id)
-        return instance
 
     def __init__(self, name=None):
         self.id = uuid4()
@@ -134,7 +128,7 @@ class OUT:
         self.array_size = array_size
 
 
-class Component(object, metaclass=InstanceCounterMeta):
+class Component(IdentifiableObject):
     states = ['new', 'starting', 'waiting', 'running', 'idle', 'stopping', 'stopped', 'shutdown']
     transitions = [
         {'trigger': 'start', 'source': 'new', 'dest': 'starting'},
@@ -154,16 +148,12 @@ class Component(object, metaclass=InstanceCounterMeta):
 
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls)
-        instance._seq_id = next(cls._ids)
-        instance.name = cls.__name__ + "_" + str(instance._seq_id)
-
         for attr_name in dir(cls):
             attr = getattr(cls, attr_name)
             if isinstance(attr, IN):
                 setattr(instance, attr_name, InputPort(attr.description, attr.display_name, attr.array_size))
             elif isinstance(attr, OUT):
                 setattr(instance, attr_name, OutputPort(attr.description, attr.display_name, attr.array_size))
-
         return instance
 
     def __init__(self, name=None):

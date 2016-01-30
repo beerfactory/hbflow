@@ -63,18 +63,15 @@ def new_component_instance(component, name):
     :param name: optional name to give to the process
     :return: the component instance (the process)
     """
-    if issubclass(component, Component):
-        component_class = component
-    else:
-        try:
-            module_name, class_name = component.rsplit(".", 1)
-            component_class = getattr(importlib.import_module(module_name), class_name)
-        except ValueError:
-            raise ComponentException("Invalid component format name '%s'" % component)
-        except AttributeError:
-            raise ComponentException("Component '%s' not found in module '%s'" % (class_name, module_name))
-        except ImportError:
-            raise ComponentException("Module '%s' can't be imported" % module_name)
+    try:
+        module_name, class_name = component.rsplit(".", 1)
+        component_class = getattr(importlib.import_module(module_name), class_name)
+    except ValueError:
+        raise ComponentException("Invalid component format name '%s'" % component)
+    except AttributeError:
+        raise ComponentException("Component '%s' not found in module '%s'" % (class_name, module_name))
+    except ImportError:
+        raise ComponentException("Module '%s' can't be imported" % module_name)
 
     return new_process(name, component_class)
 
@@ -91,6 +88,7 @@ def new_process(name, component_class):
 
 class Connection(object, metaclass=InstanceCounterMeta):
     states = ['new', 'linked', 'unlinked']
+
     def __new__(cls, *args, **kwargs):
         instance = super().__new__(cls)
         instance._seq_id = next(cls._ids)

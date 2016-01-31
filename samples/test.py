@@ -13,6 +13,9 @@ def read_yaml_config(config_file):
     return config
 
 if __name__ == "__main__":
+    formatter = "[%(asctime)s] %(name)s {%(filename)s:%(lineno)d} %(levelname)s - %(message)s"
+    logging.basicConfig(level=logging.DEBUG, format=formatter)
+    log = logging.getLogger(__name__)
     config = read_yaml_config("basic.yaml")
     ge = GraphEngine()
     ge.init_from_dictionary(config)

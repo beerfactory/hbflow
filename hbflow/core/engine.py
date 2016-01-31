@@ -1,12 +1,21 @@
 import logging
 import asyncio
 from transitions import Machine
-from .component import new_component_instance, ComponentException
+from .component import new_component_instance, ComponentException, Component, OUT, IN
 from .graph import Graph, Connection, GraphException
 
 
 class EngineException(Exception):
     pass
+
+
+class ProcessManager(Component):
+
+    command_out = OUT()
+    status_in = IN()
+
+    def __init__(self, name=None):
+        super().__init__(name)
 
 
 class GraphEngine:
@@ -32,10 +41,16 @@ class GraphEngine:
         self.processes = dict()
         self.connections = dict()
         self._graph = None
+        self._process_manager = None
         if graph:
             self.bind(graph)
 
     def bind(self, g):
+        """
+        Bind the engine to a graph description and instantiates processes
+        :param g:
+        :return:
+        """
         if not (self.state.is_new() or self.state.is_shutdown()):
             raise EngineException("Engine is already bounded to a graph instance")
         self._graph = g
@@ -76,36 +91,35 @@ class GraphEngine:
 
         self.bind(graph)
 
-    def _get_process_or_raise(self, process_name):
+    def _get_process(self, process_name, silent=True):
         """
         Get a process by its name. Raises a GraphException if no process is found
         :param self:
         :param process_name:
         :return:
         """
-        try:
-            src = self.processes[process_name]
-            return src
-        except KeyError:
-            raise GraphException("Unkown process '%s'" % process_name)
+        return [p for p in self.processes.values() if p.name == process_name]
 
     def _init_processes(self):
-        for k in self._graph.processes_desc:
-            proc_desc = self._graph.processes_desc[k]
+        for proc_desc in self._graph.processes_desc:
             try:
-                self.processes[proc_desc.process_name] = new_component_instance(proc_desc.class_name, proc_desc.process_name)
-                self.logger.debug("Process '%s' created" % proc_desc.process_name)
+                process = new_component_instance(proc_desc.class_name, proc_desc.process_name)
+                self.processes[process.id] = process
+                self.logger.debug("Process '%s' created (Id=%s)" % (process.name, process.id))
             except ComponentException as ce:
-                raise GraphException("Process '%s' instanciation failed" % proc_desc.process_name) from ce
+                raise GraphException("Process '%s' instanciation failed" % process.name) from ce
 
     def _init_connections(self):
-        for k in self._graph.connections_desc:
-            cnx_desc = self._graph.connections_desc[k]
+        for cnx_desc in self._graph.connections_desc:
 
             # find source : source process output port
             source_port = None
             try:
-                source_process = self._get_process_or_raise(cnx_desc.source_process_name)
+                process_list = self._get_process(cnx_desc.source_process_name)
+                if len(process_list) > 1:
+                    raise GraphException("Can't create connection '%s': ambiguous process name '%s'" % (cnx_desc.connection_name, cnx_desc.source_process_name))
+                else:
+                    source_process = process_list[0]
                 source_port = source_process.output_port(cnx_desc.source_port_name)
             except GraphException as ge:
                 raise GraphException("Can't create connection '%s'" % cnx_desc.connection_name) from ge
@@ -116,7 +130,11 @@ class GraphEngine:
             # find target : target process input port
             target_port = None
             try:
-                target_process = self._get_process_or_raise(cnx_desc.target_process_name)
+                process_list = self._get_process(cnx_desc.target_process_name)
+                if len(process_list) > 1:
+                    raise GraphException("Can't create connection '%s': ambiguous process name '%s'" % (cnx_desc.connection_name, cnx_desc.target_process_name))
+                else:
+                    target_process = process_list[0]
                 target_port = target_process.input_port(cnx_desc.target_port_name)
             except GraphException as ge:
                 raise GraphException("Can't create connection '%s'" % cnx_desc.connection_name) from ge
@@ -125,18 +143,23 @@ class GraphEngine:
                                      (cnx_desc.connection_name, target_process.name, cnx_desc.target_port_name))
 
             cnx = Connection(cnx_desc.connection_name)
-            if cnx.name in self.connections:
-                raise GraphException("Duplicate connection name '%s'" % cnx.name)
             cnx.link(source_port, target_port)
-            self.connections[cnx.name] = cnx
+            self.connections[cnx.id] = cnx
             self.logger.debug("Connection '%s' created" % cnx_desc.connection_name)
+
+    def _init_process_manager(self):
+        self._process_manager = ProcessManager()
+        for process in self.processes.values():
+            cnx = Connection()
+            cnx.link(self._process_manager.command_out, process._command_in)
 
     def _init_graph(self):
         self.processes = dict()
         self.connections = dict()
         try:
             self._init_processes()
-            self._init_processes()
+            self._init_connections()
+            self._init_process_manager()
             self.state.resolve()
         except GraphException as ge:
             self.state.unresolve()

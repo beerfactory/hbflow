@@ -3,6 +3,8 @@ import asyncio
 from transitions import Machine
 from .component import new_component_instance, ComponentException, Component, OUT, IN
 from .graph import Graph, Connection, GraphException
+from .packet import CommandPacket
+from .commands import *
 
 
 class EngineException(Exception):
@@ -16,6 +18,9 @@ class ProcessManager(Component):
 
     def __init__(self, name=None):
         super().__init__(name)
+
+    async def send_command(self, command):
+        await  self.command_out.send_packet(CommandPacket(command))
 
 
 class GraphEngine:
@@ -45,7 +50,7 @@ class GraphEngine:
         if graph:
             self.bind(graph)
 
-    def bind(self, g):
+    async def bind(self, g):
         """
         Bind the engine to a graph description and instantiates processes
         :param g:
@@ -54,9 +59,9 @@ class GraphEngine:
         if not (self.state.is_new() or self.state.is_shutdown()):
             raise EngineException("Engine is already bounded to a graph instance")
         self._graph = g
-        self._init_graph()
+        await self._init_graph()
 
-    def init_from_dictionary(self, dict_spec: dict):
+    async def init_from_dictionary(self, dict_spec: dict):
         # Allow 'graph' as optional root
         if 'graph' in dict_spec:
             graph_config = dict_spec.get('graph')
@@ -89,7 +94,7 @@ class GraphEngine:
                 raise GraphException("Invalid parameters for connection '%s' definition" % cnx_name) from ke
             graph.add_connection(cnx_name, source_component, source_port, target_component, target_port, cnx_capacity)
 
-        self.bind(graph)
+        await self.bind(graph)
 
     def _get_process(self, process_name, silent=True):
         """
@@ -100,7 +105,7 @@ class GraphEngine:
         """
         return [p for p in self.processes.values() if p.name == process_name]
 
-    def _init_processes(self):
+    async def _init_processes(self):
         for proc_desc in self._graph.processes_desc:
             try:
                 process = new_component_instance(proc_desc.class_name, proc_desc.process_name)
@@ -109,7 +114,7 @@ class GraphEngine:
             except ComponentException as ce:
                 raise GraphException("Process '%s' instanciation failed" % process.name) from ce
 
-    def _init_connections(self):
+    async def _init_connections(self):
         for cnx_desc in self._graph.connections_desc:
 
             # find source : source process output port
@@ -147,20 +152,23 @@ class GraphEngine:
             self.connections[cnx.id] = cnx
             self.logger.debug("Connection '%s' created" % cnx_desc.connection_name)
 
-    def _init_process_manager(self):
+    async def _init_process_manager(self):
         self._process_manager = ProcessManager()
         for process in self.processes.values():
             cnx = Connection()
             cnx.link(self._process_manager.command_out, process._command_in)
 
-    def _init_graph(self):
+    async def _init_graph(self):
         self.processes = dict()
         self.connections = dict()
         try:
-            self._init_processes()
-            self._init_connections()
-            self._init_process_manager()
+            await self._init_processes()
+            await self._init_connections()
+            await self._init_process_manager()
             self.state.resolve()
         except GraphException as ge:
             self.state.unresolve()
             raise ge
+
+    async def start(self):
+        await self._process_manager.send_command(START)

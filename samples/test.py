@@ -1,5 +1,6 @@
 import yaml
 import logging
+import asyncio
 from hbflow.core.graph import Graph
 from hbflow.core.engine import GraphEngine
 
@@ -12,11 +13,18 @@ def read_yaml_config(config_file):
         print("Invalid config_file %s: %s" % (config_file, exc))
     return config
 
-if __name__ == "__main__":
-    formatter = "[%(asctime)s] %(name)s {%(filename)s:%(lineno)d} %(levelname)s - %(message)s"
+ge = GraphEngine()
+
+async def test_coro():
+    await ge.init_from_dictionary(config)
+    await ge.start()
+    await asyncio.sleep(1)
+
+
+if __name__ == '__main__':
+    formatter = "[%(asctime)s] {%(filename)s:%(lineno)d} %(levelname)s - %(message)s"
     logging.basicConfig(level=logging.DEBUG, format=formatter)
     log = logging.getLogger(__name__)
     config = read_yaml_config("basic.yaml")
-    ge = GraphEngine()
-    ge.init_from_dictionary(config)
+    asyncio.get_event_loop().run_until_complete(test_coro())
     print(ge.processes)

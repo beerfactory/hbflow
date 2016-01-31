@@ -1,7 +1,10 @@
 import logging
+import asyncio
 from uuid import uuid4
 from transitions import Machine
-from hbflow.utils import InstanceCounterMeta, IdentifiableObject
+from hbflow.utils import IdentifiableObject
+from hbflow.core.packet import Packet, CommandPacket
+from hbflow.core.commands import *
 import importlib
 
 
@@ -10,8 +13,12 @@ class ComponentException(Exception):
 
 
 class Port(IdentifiableObject):
-    def __init__(self, name, component, description=None, display_name=None, array_size=1):
+    def __init__(self, name, component, description=None, display_name=None, loop=None):
         super().__init__()
+        if loop:
+            self._loop = loop
+        else:
+            self._loop = asyncio.get_event_loop()
         if name:
             self.name = name
         else:
@@ -19,26 +26,44 @@ class Port(IdentifiableObject):
         self.component = component
         self.description = description
         self.display_name = display_name
-        self.array_size = array_size
         self.connections = []
-        for i in range(self.array_size):
-            self.connections.append([])
+        self.connected_event = asyncio.Event()
 
-    def add_connection(self, connection, index=0):
-        self.connections[index].append(connection)
+    def add_connection(self, connection):
+        self.connections.append(connection)
+        if not self.connected_event.is_set():
+            self.connected_event.set()
 
-    def remove_connection(self, connection, index=0):
-        self.connections[index].remove(connection)
+    def remove_connection(self, connection):
+        self.connections.remove(connection)
+        if not self.connections:
+            self.connected_event.clear()
 
 
 class InputPort(Port):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+    async def read_packet(self):
+        await self.connected_event.wait()
+        futures = []
+        for cnx in self.connections:
+            futures.append(cnx.get_packet())
+        if futures:
+            done, pending = await asyncio.wait(futures, return_when=asyncio.FIRST_COMPLETED, loop=self._loop)
+            packet = done.pop().result()
+            return self, packet
+        else:
+            return self, None
+
 
 class OutputPort(Port):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+    async def send_packet(self, packet):
+        for cnx in self.connections:
+            await cnx.put_packet(packet)
 
 
 def get_component_class(component_name):
@@ -64,15 +89,17 @@ def get_component_class(component_name):
 class Connection(IdentifiableObject):
     states = ['new', 'linked', 'unlinked']
 
-    def __init__(self, name=None):
+    def __init__(self, name=None, capacity=1):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.id = uuid4()
-        self.machine = Machine(model=self, states=Connection.states, initial='new')
+        self.state = Machine(states=Connection.states, initial='new')
         if name:
             self.name = name
         else:
             self.name = self._instance_name
+        self.capacity = capacity
+        self.packet_queue = asyncio.Queue(self.capacity)
         self.source = None
         self.target = None
 
@@ -85,14 +112,21 @@ class Connection(IdentifiableObject):
         source.add_connection(self)
         target.add_connection(self)
         self.logger.debug("Linked created: %s:%s -> %s:%s" % (source.component.name, source.name, target.component.name, target.name))
-        self.to_linked()
+        self.state.to_linked()
 
     def unlink(self):
+        self.logger.debug("Linked removed: %s:%s -> %s:%s" % (self.source.component.name, self.source.name, self.target.component.name, self.target.name))
         self.source = None
         self.target = None
         # Todo: remove connection from source and target
-        self.to_unlinked()
+        self.state.to_unlinked()
 
+    async def put_packet(self, packet):
+        await self.packet_queue.put(packet)
+
+    async def get_packet(self):
+        packet = await self.packet_queue.get()
+        return packet
 
 class IN:
     def __init__(self, description=None, display_name=None, array_size=1):
@@ -126,30 +160,67 @@ class Component(IdentifiableObject):
     _command_in = IN()
     _status_out = OUT()
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, name=None, loop=None):
         instance = super().__new__(cls)
         for attr_name in dir(cls):
             attr = getattr(cls, attr_name)
             if isinstance(attr, IN):
-                setattr(instance, attr_name, InputPort(attr_name, instance, attr.description, attr.display_name, attr.array_size))
+                setattr(instance, attr_name, InputPort(attr_name, instance, attr.description, attr.display_name, loop))
             elif isinstance(attr, OUT):
-                setattr(instance, attr_name, OutputPort(attr_name, instance, attr.description, attr.display_name, attr.array_size))
+                setattr(instance, attr_name, OutputPort(attr_name, instance, attr.description, attr.display_name, loop))
         return instance
 
-    def __init__(self, name=None):
+    def __init__(self, name=None, loop=None):
         super().__init__()
+        self.logger = logging.getLogger(__name__)
+        if loop:
+            self._loop = loop
+        else:
+            self._loop = asyncio.get_event_loop()
         self.machine = Machine(model=self, states=Component.states, transitions=Component.transitions, initial='new')
         self.id = uuid4()
         if name:
             self.name = name
         else:
             self.name = self._instance_name
+        asyncio.ensure_future(self._packet_loop(), loop=self._loop)
 
     def input_port(self, port_name):
         return getattr(self, port_name, None)
 
     def output_port(self, port_name):
         return getattr(self, port_name, None)
+
+    async def _packet_loop(self):
+        while True:
+            self._futures = []
+            self._futures.append(self._command_in.read_packet())
+            if self._futures:
+                done, pending = await asyncio.wait(self._futures, return_when=asyncio.FIRST_COMPLETED, loop=self._loop)
+            if done:
+                task = done.pop()
+                input_port, packet = task.result()
+                if packet:
+                    if isinstance(packet, CommandPacket):
+                        await self._handle_command(packet)
+                    else:
+                        await self.on_packet(input_port, packet)
+                else:
+                    self.logger.warning("Empty packet received")
+
+    async def _handle_command(self, packet: CommandPacket):
+        if not packet.command:
+            self.logger.warning("Invalid command packet received")
+            return
+        func_name = '_handle_command_' + packet.command
+        try:
+            func = getattr(self, func_name)
+            func(packet)
+        except AttributeError:
+            self.logger.warning("Command '%s' ignored (no handler)" % packet.command)
+
+    async def on_packet(self, from_port: InputPort, packet: Packet):
+        pass
 
 
 def new_component_instance(component, name) -> Component:
